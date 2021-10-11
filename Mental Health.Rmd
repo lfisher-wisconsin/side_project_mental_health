@@ -1,0 +1,47 @@
+---
+title: "Side Project Mental Health"
+author: "Lindsey Fisher"
+date: "10/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(haven)
+mh_2020 = haven::read_xpt("LLCP2020.XPT")
+mh_2018 = haven::read_xpt("LLCP2018.XPT")
+
+##Dataset Explaination: BRFSS’s objective is to collect uniform state-specific data on health risk behaviors, chronic diseases and conditions, access to health care, and use of preventive health services related to the leading causes of death and disability in the United States.
+
+library(lubridate)
+##Make interview date a date value 
+mh_2020$IDATE = as.Date(mh_2020$IDATE, "%d%m%Y")
+##Change dispcode to binary: 1 means interview complete, 0 means interview partially complete 
+mh_2020 = mh_2020 %>%
+mutate(DISPCODE = case_when(DISPCODE == 1100 ~ 1,
+      DISPCODE == 1200 ~ 0))
+
+## Make a list of unimportant columns to drop
+drop_cols = c("_PSU","SEQNO", "STATERE1")
+
+##drop unimportant columns 
+mh_2020 = mh_2020[,!(names(mh_2020)%in% drop_cols)]
+
+
+##Change blank in correct telephone number to 0. 1= correct telephone number 0 = Missing Info.
+mh_2020$CTELENM1[is.na(mh_2020$CTELENM1)] <- 0
+##Change blank to 0.0 = Missing Info.
+mh_2020$PVTRESD1[is.na(mh_2020$PVTRESD1)] <- 0
+## 0 = missing, 1 private residence, 2 not private residence 
+mh_2020$PVTRESD1 = as.factor(mh_2020$PVTRESD1)
+## change NA to 0. 0 = not college housing, 1 college housing
+mh_2020$COLGHOUS[is.na(mh_2020$COLGHOUS)] <- 0
+
+
+
+
+```
+
