@@ -1,0 +1,403 @@
+---
+title: "Mental Health Analysis 2020"
+author: "Lindsey Fisher"
+date: "1/9/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+##load packages 
+library(lubridate)
+library(tidyverse)
+library(haven)
+library(smbinning)
+library(readxl)
+
+##read data 
+States <- read_excel("States .xlsx")
+mh_2020 = haven::read_xpt("LLCP2020.XPT")
+
+##filter for only the fully finished interviews
+mh_2020 = mh_2020 %>%
+  filter(DISPCODE == 1100) 
+
+
+```
+
+Cleaning 
+```{r}
+#Remove vars where NA is greater than 75%. Looking for variables which were answered by the majority of the respondent population. Changing blank cells to NA so they can be removed with is.na
+
+mh_2020[mh_2020 == ""] <- NA    
+
+pct_na = data.frame((sapply(mh_2020, function(x)sum(is.na(x)/330619))))
+
+
+pct_na = pct_na %>% 
+  rename("pct_na"="X.sapply.mh_2020..function.x..sum.is.na.x..330619...") %>% 
+  filter(pct_na < 0.25)
+
+
+variables_keep = rownames(pct_na)
+
+##remove vars which do not relate to the interviewee, are redundant or nonsensical
+
+undesired <- c("FMONTH","IDATE","IDAY","IYEAR","DISPCODE","SEQNO","_PSU","MENTHLTH","ADDEPEV3","HEIGHT","PNEUVAC","FLUSHOT7","HIVTST7","QSTVER","_STSTR","_STRWT","_RAWRAKE","WT2RAKE","_DUALUSE",'_LLCPWT2', '_LLCPWT',"RMVTETH4","HEIGHT3","PNEUVAC4","_WT2RAKE","_EXTETH3","AIDTST4","_ASTHMS1","_EXTETH3",'_ALTETH3', "_PRACE1","_MRACE1","_RACE","_RACEG21",'_RACEGR3',"_RACEPRV",'_SEX','_AGE65YR','_AGE80','_AGE_G','HTIN4','HTM4','WTKG3','_BMI5','_DRNKWK1','_FLSHOT7','_PNEUMO3','_RFSEAT2','_RFMAM22','_MAM5023','_RFPAP35','_RFPSA23','_CLNSCPY','_SGMSCPY','_SGMS10Y','_RFBLDS4','_AIDTST4','_INCOMG',"CATHSMA1","CPDEMO1B", "CHILDREN","WEIGHT2","ALCDAY5","SEATBELT","DROCDY3_")
+
+##removing vars from modeling data frame
+mh_2020_model <- mh_2020 %>%
+  select(one_of(variables_keep))
+
+mh_2020_model <- mh_2020_model %>%
+  select(-one_of(undesired))
+
+##rename vars
+mh_2020_model = mh_2020_model %>%
+  rename(
+    "MENT14D" = "_MENT14D",
+    "METSTAT" = "_METSTAT",
+    "URBSTAT" = "_URBSTAT",
+    "AGE5YR" = "_AGEG5YR",
+    "BMI5CAT" = '_BMI5CAT',
+    "RFBMI5" = '_RFBMI5',
+    "CHLDCNT" = '_CHLDCNT',
+    "EDUCAG" = '_EDUCAG',
+    "SMOKER3" = '_SMOKER3',
+    "RFSMOK3" = '_RFSMOK3',
+    "RFBING5" = '_RFBING5',
+    "RFDRHV7" = '_RFDRHV7',
+    "DRNKDRV" = '_DRNKDRV',
+    "HISPANIC" = '_HISPANC',
+    "STATE"= "_STATE",
+    "IMPRACE" = "_IMPRACE",
+    "RFHLTH"="_RFHLTH",
+    "PHYS14D"="_PHYS14D",
+    "HCVU651"="_HCVU651",
+    "TOTINDA"="_TOTINDA",
+    "MICHD"="_MICHD",
+    "LTASTH1"="_LTASTH1",
+    "DRDXAR2"="_DRDXAR2",
+    'DENVST3' = '_DENVST3',
+    'RFDRHV7' = '_RFDRHV7', 
+    'RFSEAT3' = '_RFSEAT3',
+    'DRNKDRV' ='_DRNKDRV',
+    'CASTHM1'= '_CASTHM1')
+
+```
+
+```{r}
+##bring target variable to first column
+mh_2020_model = mh_2020_model %>%  select(MENT14D, everything())
+
+
+###replace all left over blank or na with "Missing" labeled category 
+mh_2020_model[mh_2020_model == ""] <- NA    
+mh_2020_model %>% mutate(across(everything(), .fns = ~replace_na(.,"Missing"))) 
+
+
+###Editing individual Variables 
+
+##MENT14D: remove missing, represents 1.97%.
+#1 = reported poor mental health in the past month 
+#0= good mental health over last month 
+mh_2020_model = mh_2020_model %>% filter(MENT14D != 9 )
+mh_2020_model$MENT14D[mh_2020_model$MENT14D == 1] = 0
+mh_2020_model$MENT14D[mh_2020_model$MENT14D == 2] = 0
+mh_2020_model$MENT14D[mh_2020_model$MENT14D == 3] = 1
+
+
+## Get State Names joined by fips code 
+mh_2020_model=inner_join(mh_2020_model,States,by=c("STATE"="FIPS"))
+##remove fips code 
+mh_2020_model=mh_2020_model %>% 
+  select(-STATE)
+
+##General Health Factor 
+mh_2020_model$GENHLTH[mh_2020_model$GENHLTH == 9 |
+                        mh_2020_model$GENHLTH==7] = "Don't know or Refused"
+
+##Number of days health not good: 88 represents none so replace with 0
+mh_2020_model$PHYSHLTH[mh_2020_model$PHYSHLTH == 88] = 0
+mh_2020_model$PHYSHLTH[mh_2020_model$PHYSHLTH == 77 |
+                       mh_2020_model$PHYSHLTH == 99] = "Don't know or Refused"
+
+##do you have healthcare. 0=no,1=yes,2=dont know or refuse
+mh_2020_model$HLTHPLN1[mh_2020_model$HLTHPLN1 == 2] = 0
+mh_2020_model$HLTHPLN1[mh_2020_model$HLTHPLN1 > 2] = "Don't know or Refused"
+
+##Personal doctor. 0 = no, 1= yes only one,2=more than one
+mh_2020_model$PERSDOC2[mh_2020_model$PERSDOC2 == 3] = 0
+mh_2020_model$PERSDOC2[mh_2020_model$PERSDOC2 > 3] = "Don't know or Refused"
+
+## couldn't see doctor because of cost in last year. 0 = no, 1= yes
+mh_2020_model$MEDCOST[mh_2020_model$MEDCOST == 2] = 0
+mh_2020_model$MEDCOST[mh_2020_model$MEDCOST > 2] = "Don't know or Refused"
+
+#length of time since last routine check up. 8 = Never.
+mh_2020_model$CHECKUP1[mh_2020_model$CHECKUP1 == 8] = 0
+mh_2020_model$CHECKUP1[mh_2020_model$CHECKUP1 == 7 |
+                       mh_2020_model$CHECKUP1 == 9] = "Don't know or Refused"
+
+## exercise in last month. 0 = no, 1= yes 
+mh_2020_model$EXERANY2[mh_2020_model$EXERANY2 == 2] = 0
+mh_2020_model$EXERANY2[mh_2020_model$EXERANY2 == 7 |
+                       mh_2020_model$EXERANY2 == 9] = "Don't know or Refused"
+
+##sleep time
+mh_2020_model$SLEPTIM1[mh_2020_model$SLEPTIM1 > 10] = "11+"
+mh_2020_model$SLEPTIM1[mh_2020_model$SLEPTIM1 == 77 |
+                       mh_2020_model$SLEPTIM1 == 99] ="Don't know or Refused"
+
+
+##heart attack or myocardial infraction?0=no,1=yes
+mh_2020_model$CVDINFR4[mh_2020_model$CVDINFR4 == 2] = 0
+ mh_2020_model$CVDINFR4[mh_2020_model$CVDINFR4 == 7 |
+                       mh_2020_model$CVDINFR4 == 9] = "Don't know or Refused"
+ 
+##angina or coronary heart disease.0=no,1=yes
+mh_2020_model$CVDCRHD4[mh_2020_model$CVDCRHD4 == 2] = 0
+mh_2020_model$CVDCRHD4[mh_2020_model$CVDCRHD4 == 7 |
+                       mh_2020_model$CVDCRHD4 == 9] = "Don't know or Refused"
+##stroke.0=no,1=yes
+mh_2020_model$CVDSTRK3[mh_2020_model$CVDSTRK3 == 2] = 0
+mh_2020_model$CVDSTRK3[mh_2020_model$CVDSTRK3 > 2] = "Don't know or Refused"
+
+##Asthma ever?0=no,1=yes
+mh_2020_model$ASTHMA3[mh_2020_model$ASTHMA3 == 2] = 0
+mh_2020_model$ASTHMA3[mh_2020_model$ASTHMA3 > 2] = "Don't know or Refused"
+
+##skin cancer ever? 0=no,1=yes
+mh_2020_model$CHCSCNCR[mh_2020_model$CHCSCNCR == 2] = 0
+mh_2020_model$CHCSCNCR[mh_2020_model$CHCSCNCR > 2] = "Don't know or Refused"
+
+##other cancers ever? 0 is no 1 is yes
+mh_2020_model$CHCOCNCR[mh_2020_model$CHCOCNCR == 2] = 0
+mh_2020_model$CHCOCNCR[mh_2020_model$CHCOCNCR > 2] = "Don't know or Refused"
+
+##COPD? 0 is no 1 is yes
+mh_2020_model$CHCCOPD2[mh_2020_model$CHCCOPD2 == 2] = 0
+mh_2020_model$CHCCOPD2[mh_2020_model$CHCCOPD2 > 2] = "Don't know or Refused"
+
+##Arthritis.0=no,1=yes
+mh_2020_model$HAVARTH4[mh_2020_model$HAVARTH4 == 2] = 0
+mh_2020_model$HAVARTH4[mh_2020_model$HAVARTH4 > 2] = "Don't know or Refused"
+
+##kidney disease? 0=no,1=yes
+mh_2020_model$CHCKDNY2[mh_2020_model$CHCKDNY2 == 2] = 0
+mh_2020_model$CHCKDNY2[mh_2020_model$CHCKDNY2 > 2] = "Don't know or Refused"
+
+
+##DIABETES. 0=no,1=yes
+mh_2020_model$DIABETE4[mh_2020_model$DIABETE4 == 1] = 1
+mh_2020_model$DIABETE4[mh_2020_model$DIABETE4 == 2] = 1
+mh_2020_model$DIABETE4[mh_2020_model$DIABETE4 > 2 & mh_2020_model$DIABETE4 <5] = 0
+mh_2020_model$DIABETE4[mh_2020_model$DIABETE4 == 7 |
+                       mh_2020_model$DIABETE4 == 9] = "Don't know or Refused"
+
+
+##LAST SAW DENTIST:0 IS NEVER, 5 IS OTHER
+mh_2020_model$LASTDEN4[mh_2020_model$LASTDEN4 == 8] = 0
+mh_2020_model$LASTDEN4[mh_2020_model$LASTDEN4 == 7] = "Don't know or Refused"
+mh_2020_model$LASTDEN4[mh_2020_model$LASTDEN4 == 9] = "Don't know or Refused"
+
+
+#martial status
+mh_2020_model$MARITAL[mh_2020_model$MARITAL == 9] = "Don't know or Refused"
+
+
+##Education levels
+mh_2020_model$EDUCA[mh_2020_model$EDUCA == 9] = "Don't know or Refused"
+
+
+#rent home? 
+mh_2020_model$RENTHOM1[mh_2020_model$RENTHOM1 > 3] = "Don't know or Refused"
+
+
+
+#veteran0=no,1=yes
+mh_2020_model$VETERAN3[mh_2020_model$VETERAN3 > 2] ="Don't know or Refused"
+mh_2020_model$VETERAN3[mh_2020_model$VETERAN3 == 2] = 0
+
+#EMPLOY1
+mh_2020_model$EMPLOY1[mh_2020_model$EMPLOY1 == 9] = "Don't know or Refused"
+
+##Income 
+mh_2020_model$INCOME2[ mh_2020_model$INCOME2 == 77 |mh_2020_model$INCOME2 == 99] = "Don't know or Refused"
+
+##deaf
+mh_2020_model$DEAF[mh_2020_model$DEAF > 2] ="Don't know or Refused"
+
+##blind
+mh_2020_model$BLIND[mh_2020_model$BLIND > 2] ="Don't know or Refused"
+
+#'DECIDE'
+mh_2020_model$DECIDE[mh_2020_model$DECIDE > 2] = "Don't know or Refused"
+
+#'DIFFWALK'
+mh_2020_model$DIFFWALK[mh_2020_model$DIFFWALK > 2] = "Don't know or Refused"
+
+#'DIFFDRES'
+mh_2020_model$DIFFDRES[mh_2020_model$DIFFDRES > 2] = "Don't know or Refused"
+
+#'DIFFALON'
+mh_2020_model$DIFFALON[mh_2020_model$DIFFALON > 2] = "Don't know or Refused"
+
+#'SMOKE100'
+mh_2020_model$SMOKE100[mh_2020_model$SMOKE100 > 2] = "Don't know or Refused"
+
+#'USENOW3'
+mh_2020_model$USENOW3[mh_2020_model$USENOW3 > 3] = "Don't know or Refused"
+
+#'HIVRISK5'
+mh_2020_model$HIVRISK5[mh_2020_model$HIVRISK5 > 2] = "Don't know or Refused"
+
+#"_HISPANIC"
+mh_2020_model$HISPANIC[mh_2020_model$HISPANIC > 2] = "Don't know or Refused"
+
+##RFHEALTH
+mh_2020_model$RFHLTH[mh_2020_model$RFHLTH > 2] = "Don't know or Refused"
+
+##PHYS14D
+mh_2020_model$PHYS14D[mh_2020_model$PHYS14D > 3] = "Don't know or Refused"
+
+##healthcare coverage calculated variable
+mh_2020_model$HCVU651[mh_2020_model$HCVU651 > 2] = "Don't know or Refused"
+
+##physical activity calculated variable 
+mh_2020_model$TOTINDA[mh_2020_model$TOTINDA > 2] = "Don't know or Refused"
+
+##asthma ever calculated variable 
+mh_2020_model$LTASTH1[mh_2020_model$LTASTH1 > 2] = "Don't know or Refused"
+
+##asthma current calculated variable 
+mh_2020_model$CASTHM1[mh_2020_model$CASTHM1 > 2] = "Don't know or Refused"
+
+##dentist calculated variable 
+mh_2020_model$DENVST3[mh_2020_model$DENVST3 > 2] = "Don't know or Refused"
+
+##hispanic calculated variable 
+mh_2020_model$HISPANIC[mh_2020_model$HISPANIC > 2] = "Don't know or Refused"
+
+##age categories
+mh_2020_model$AGE5YR[mh_2020_model$AGE5YR > 13] = "Don't know or Refused"
+
+##BMI calculated varibale 
+mh_2020_model$RFBMI5[mh_2020_model$RFBMI5 > 2] = "Don't know or Refused"
+
+##child count 
+mh_2020_model$CHLDCNT[mh_2020_model$CHLDCNT > 6] = "Don't know or Refused"
+
+##education levels 
+mh_2020_model$EDUCAG[mh_2020_model$EDUCAG > 4] = "Don't know or Refused"
+
+##current smokers
+mh_2020_model$RFSMOK3[mh_2020_model$RFSMOK3 > 2] = "Don't know or Refused"
+
+##adults with at least one drink in past 30 days
+mh_2020_model$DRNKANY5[mh_2020_model$DRNKANY5 > 2] = "Don't know or Refused"
+
+##binge drinking 
+mh_2020_model$RFBING5[mh_2020_model$RFBING5 > 2] = "Don't know or Refused"
+
+##heavy drinkers 
+mh_2020_model$RFDRHV7[mh_2020_model$RFDRHV7 > 2] = "Don't know or Refused"
+
+##wear seat belt
+mh_2020_model$RFSEAT3[mh_2020_model$RFSEAT3 > 2] = "Don't know or Refused"
+
+##engaging in drinking and driving 
+mh_2020_model$DRNKDRV[mh_2020_model$DRNKDRV > 2] = "Don't know or Refused"
+
+
+
+##factorize all variables 
+
+mh_2020_model[sapply(mh_2020_model, is.numeric)] <- lapply(mh_2020_model[sapply(mh_2020_model, is.numeric)], as.factor) mh_2020_model[sapply(mh_2020_model, is.character)] <- lapply(mh_2020_model[sapply(mh_2020_model, is.character)], as.factor)
+
+##do not need to correct for rare event sampling bc greater than 5%
+prop.table(table(mh_2020_model$MENT14D))
+
+##check levels 
+sapply(mh_2020_model, levels)
+
+
+```
+
+
+```{r}
+##train test spit for modeling 
+set.seed(123)
+mh_2020_model <- mh_2020_model %>% mutate(id = row_number())
+
+train <- mh_2020_model %>% sample_frac(0.7)
+
+test <- anti_join(mh_2020_model, train, by = 'id')
+
+train = train %>% 
+  select(-id)
+
+```
+Visualization 
+```{r}
+library(ggplot2)
+
+##Sleeptime 
+mh_2020_model$SLEPTIM1 <- factor(mh_2020_model$SLEPTIM1, levels = c("1","2","3","4","5","6","7","8","9","10","11+"))
+mh_2020_model$MENT14D=as.numeric(mh_2020_model$MENT14D)
+alpha=0.05
+sleep=mh_2020_model %>% 
+  select(MENT14D,SLEPTIM1) %>% 
+  group_by(SLEPTIM1) %>% 
+  summarise(mean=mean(MENT14D),
+            count=n(),
+            sd=var(MENT14D),
+            se = sd(MENT14D) / sqrt(length(MENT14D)),
+            t=qt((1-alpha)/2 + .5, length(MENT14D)-1), CI=t*se)
+ggplot(data=sleep,aes(x=SLEPTIM1,y=mean))+
+  geom_col(fill = "royalblue2")+
+  theme_minimal()+
+  geom_errorbar( aes(x=SLEPTIM1, ymin=mean-CI, ymax=mean+CI), width=0.4, colour="orange", alpha=0.9, size=1.5) +  theme(axis.text=element_text(size=14),
+        axis.title=element_text(size=14))+
+  xlab("Hours of Sleep per Day")+
+  ylab("Percent Reporting Poor Mental Health")+
+  ggtitle("On average, how many hours of sleep do you get in a 24-hour period?")
+#########distribution of responses for sleep time 
+ggplot(data=sleep,aes(x=SLEPTIM1,y=count))+
+  geom_col(fill = "royalblue2")+
+  theme_minimal()+
+   theme(axis.text=element_text(size=14),
+        axis.title=element_text(size=14))+
+  xlab("Hours of Sleep per Day")+
+  ylab("Count of Responses")+
+  ggtitle("On average, how many hours of sleep do you get in a 24-hour period?")
+#################################################################
+##decide
+concentrate = mh_2020_model %>% 
+  select(MENT14D,DECIDE) %>% 
+  mutate(DECIDE = case_when(DECIDE == 1 ~ "Yes",
+                            DECIDE == 2 ~ "No",
+                            DECIDE != 1 & DECIDE != 2 ~ "Not asked or Missing")) %>% 
+  group_by(DECIDE) %>% 
+ 
+  summarise(mean = mean(MENT14D),
+            sd=var(MENT14D),
+            se = sd(MENT14D) / sqrt(length(MENT14D)),
+            t=qt((1-alpha)/2 + .5, length(MENT14D)-1), CI=t*se)
+
+concentrate$DECIDE <- factor(concentrate$DECIDE, levels = c("Not asked or Missing","No","Yes"))
+ggplot(data=concentrate,aes(x=DECIDE,y=mean))+
+  geom_col(fill = "royalblue2")+
+  theme_classic()+
+  theme(axis.text=element_text(size=16),
+        axis.title=element_text(size=18))+
+  ylab("Percent Reporting Poor Mental Health")+
+  xlab("Response")+
+geom_errorbar( aes(x=DECIDE, ymin=mean-CI, ymax=mean+CI), width=0.4, colour="orange", alpha=0.9, size=1.5)+  ggtitle("Because of a physical, mental, or emotional condition, do you have serious difficulty concentrating,
+remembering, or making decisions?")
+
+```
+

@@ -1,0 +1,110 @@
+---
+title: "MH MODELING"
+author: "Lindsey Fisher"
+date: "1/27/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+model_df = read.csv("side_proj_mh.csv")
+model_df[sapply(model_df, is.integer)] <- lapply(model_df[sapply(model_df, is.integer)], as.factor)
+model_df[sapply(model_df, is.character)] <- lapply(model_df[sapply(model_df, is.character)], as.factor)
+
+set.seed(123)
+model_df <- model_df %>% mutate(id = row_number())
+
+train <- model_df %>% sample_frac(0.7)
+
+test <- anti_join(model_df, train, by = 'id')
+
+remove = c("id","X")
+train = train %>% 
+  select(-one_of(remove))
+
+##add a random variable for determining variable importance cutoff
+train$random <- rnorm(225370)
+
+
+```
+Models: 
+
+Deep Learning (Neural Networks)
+Distributed Random Forest (DRF)
+Generalized Linear Model (GLM)
+Gradient Boosting Machine (GBM)
+Naïve Bayes Classifier(naive Byaes)
+
+Modeling
+```{r}
+
+##use H2o for parallel computing & modeling speed increase 
+
+library(h2o)
+h2o.init()
+
+# Set predictors and response; set response as a factor
+predictors = colnames(train[,2:65])
+response <- "MENT14D"
+
+##H2o objects 
+train_H2O=as.h2o(train)
+test_H2O=as.h2o(test)
+
+# Train models: DRF,GBM,NN,GLM,Naive bayes
+# DRF = h2o.randomForest(x = predictors, y = response,training_frame = train_H2O,validation_frame = test_H2O,seed = 1234)
+GBM = h2o.gbm(x = predictors, y = response,
+                  training_frame = train_H2O,validation_frame = test_H2O, seed = 1234)
+# NN=h2o.deeplearning(x = predictors, y = response,
+#                   training_frame = train_H2O,validation_frame = test_H2O,seed = 1234)
+# GLM=h2o.glm(x = predictors, y = response,
+#                   training_frame = train_H2O,validation_frame = test_H2O, seed = 1234)
+# 
+# 
+# Bayes= h2o.naiveBayes(x = predictors, y = response,
+#                   training_frame = train_H2O,validation_frame = test_H2O, seed = 1234)
+
+# ##AUC:0.7768995 BAYES
+# h2o.performance(Bayes)
+# ##AUC:0.7874792 DRF
+# h2o.performance(DRF)
+# ##AUC: 0.8297517 GBM
+# h2o.performance(GBM)
+# ##AUC: 0.8195412 GLM
+# h2o.performance(GLM)
+# ##AUC:0.8249848 NN
+# h2o.performance(NN)
+
+
+
+# Extract feature interactions:
+feature_interactions <- h2o.feature_interaction(GBM)
+print(feature_interactions[[2]])
+feature2=feature_interactions[[2]]
+feature2 =feature2 %>% 
+  filter(gain_rank < 11)
+
+write.csv(feature2,"feature2.csv")
+
+```
+
+
+```{r}
+
+## outputs
+var_imp_rf= RF@model[["variable_importances"]]
+var_imp_GBM_df = GBM@model[["variable_importances"]]
+h2o.varimp_plot(GBM)
+
+##write importance to csv 
+write.csv(var_imp_rf,"var_import_rf_1.csv")
+write.csv(var_imp_GBM_df,"var_import_GBM_rando.csv")
+
+h2o.shutdown()
+```
+
